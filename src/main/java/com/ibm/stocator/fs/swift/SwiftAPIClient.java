@@ -51,6 +51,7 @@ import org.apache.hadoop.fs.FileSystem.Statistics;
 import com.ibm.stocator.fs.common.Constants;
 import com.ibm.stocator.fs.common.IStoreClient;
 import com.ibm.stocator.fs.common.Utils;
+import com.ibm.stocator.fs.swift.pushdown.SwiftPushdownInputStream;
 import com.ibm.stocator.fs.swift.auth.PasswordScopeAccessProvider;
 
 import org.codehaus.jackson.map.ObjectMapper;
@@ -279,7 +280,7 @@ public class SwiftAPIClient implements IStoreClient {
   public FSDataInputStream getObject(String hostName, Path path) throws IOException {
     LOG.debug("Get object: {}", path);
     try {
-      SwiftInputStream sis = new SwiftInputStream(this, hostName, path);
+      SwiftInputStream sis = new SwiftPushdownInputStream(this, hostName, path);
       return new FSDataInputStream(sis);
     } catch (IOException e) {
       LOG.error(e.getMessage());

@@ -29,14 +29,14 @@ import org.slf4j.LoggerFactory;
 import org.apache.hadoop.fs.FSInputStream;
 import org.apache.hadoop.fs.Path;
 
-class SwiftInputStream extends FSInputStream {
+public class SwiftInputStream extends FSInputStream {
 
   private static final Logger LOG = LoggerFactory.getLogger(SwiftInputStream.class);
 
   /*
    * File nativeStore instance
    */
-  private final SwiftAPIClient nativeStore;
+  protected final SwiftAPIClient nativeStore;
 
   /*
    * Data input stream
@@ -51,7 +51,7 @@ class SwiftInputStream extends FSInputStream {
   /*
    * Reference to the stored object
    */
-  private StoredObject storedObject;
+  protected StoredObject storedObject;
 
   /**
    * Move to a new position within the file relative to where the pointer is now.
@@ -63,9 +63,13 @@ class SwiftInputStream extends FSInputStream {
     pos += offset;
   }
 
+  public SwiftInputStream(SwiftAPIClient storeNative) {
+    nativeStore = storeNative;
+  }
+
   public SwiftInputStream(SwiftAPIClient storeNative, String hostName,
                           Path path) throws IOException {
-    nativeStore = storeNative;
+    this(storeNative);
     LOG.debug("init: {}", path.toString());
     String objectName = path.toString().substring(hostName.length());
     storedObject = nativeStore.getAccount().getContainer(nativeStore.getDataRoot())
@@ -119,6 +123,11 @@ class SwiftInputStream extends FSInputStream {
 
   @Override
   public synchronized void seek(long targetPos) throws IOException {
+    DownloadInstructions instructions = seekPart1(targetPos);
+    seekPart2(targetPos, instructions);
+  }
+
+  protected DownloadInstructions seekPart1(long targetPos) throws IOException {
     LOG.debug("seek method to: {}, for {}", targetPos, storedObject.getName());
     if (targetPos < 0) {
       throw new IOException("Negative Seek offset not supported");
@@ -129,7 +138,7 @@ class SwiftInputStream extends FSInputStream {
       if (offset == 0) {
         LOG.debug("seek called on same position as the previous one. New HTTP Stream is not "
                 + "required.");
-        return;
+        return new DownloadInstructions();
       }
       long blockSize = nativeStore.getBlockSize();
       if (offset < 0) {
@@ -150,7 +159,7 @@ class SwiftInputStream extends FSInputStream {
         incPos(byteRead);
         if (targetPos == pos) {
           LOG.debug("seek reached targetPos: {}. New HTTP Stream is not required.", targetPos);
-          return;
+          return new DownloadInstructions();
         }
         LOG.debug("seek failed to reach targetPos: {}. New HTTP Stream is required.", targetPos);
       }
@@ -172,6 +181,10 @@ class SwiftInputStream extends FSInputStream {
       }
     };
     instructions.setRange(range);
+    return instructions;
+  }
+
+  protected void seekPart2(long targetPos, DownloadInstructions instructions) throws IOException {
     httpStream = storedObject.downloadObjectAsInputStream(instructions);
     LOG.debug("Seek completed. Got HTTP Stream for: {}", storedObject.getName());
     pos = targetPos;

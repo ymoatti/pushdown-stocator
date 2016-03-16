@@ -261,7 +261,7 @@ To easy the debug process, Please modify `conf/log4j.properties` and add
 
 	log4j.logger.com.ibm.stocator=DEBUG
 
-## Before you sumit your pull request
+## Before you submit your pull request
 We ask that you include a line similar to the following as part of your pull request comments: “DCO 1.1 Signed-off-by: Random J Developer“. “DCO” stands for “Developer Certificate of Origin,” and refers to the same text used in the Linux Kernel community. By adding this simple comment, you tell the community that you wrote the code you are contributing, or you have the right to pass on the code that you are contributing.
 
 ## Need more information?
