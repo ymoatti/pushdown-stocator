@@ -23,6 +23,7 @@ import java.util.List;
 import org.javaswift.joss.model.Container;
 import org.javaswift.joss.headers.GeneralHeader;
 import org.javaswift.joss.instructions.DownloadInstructions;
+import org.javaswift.joss.headers.object.range.AbstractRange;
 
 import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
@@ -56,15 +57,44 @@ public class SwiftPushdownInputStream extends SwiftInputStream {
     }
   }
 
+  @Override
   public synchronized void seek(long targetPos) throws IOException {
-    DownloadInstructions instructions = super.seekPart1(targetPos);
+    super.seekPart1(targetPos);
+
+    DownloadInstructions instructions = new DownloadInstructions();
 
     // add the Pushdown headers:
     for (GeneralHeader nextHeader : pushdownHeaders) {
       instructions.addHeader(nextHeader);
     }
 
-    super.seekPart2(targetPos, instructions);
+    LOG.warn("pushdownHeaders.size is  " + pushdownHeaders.size());
+    if (pushdownHeaders.size() <= 0) {
+      instructions = super.seekPart2(targetPos);
+    } else {
+      AbstractRange range;
+      range = new AbstractRange(targetPos, targetPos + nativeStore.getBlockSize()) {
+
+          @Override
+          public long getTo(int arg0) {
+            return offset;
+          }
+
+          @Override
+          public long getFrom(int arg0) {
+            return length;
+          }
+
+          @Override
+          public String getHeaderName() {
+            return "X-Storlet-Range";
+          }
+
+        };
+      instructions.setRange(range);
+    }
+
+    super.seekPart3(targetPos, instructions);
   }
 
   /**

@@ -123,11 +123,12 @@ public class SwiftInputStream extends FSInputStream {
 
   @Override
   public synchronized void seek(long targetPos) throws IOException {
-    DownloadInstructions instructions = seekPart1(targetPos);
-    seekPart2(targetPos, instructions);
+    seekPart1(targetPos);
+    DownloadInstructions instructions = seekPart2(targetPos);
+    seekPart3(targetPos, instructions);
   }
 
-  protected DownloadInstructions seekPart1(long targetPos) throws IOException {
+  protected void seekPart1(long targetPos) throws IOException {
     LOG.debug("seek method to: {}, for {}", targetPos, storedObject.getName());
     if (targetPos < 0) {
       throw new IOException("Negative Seek offset not supported");
@@ -138,7 +139,7 @@ public class SwiftInputStream extends FSInputStream {
       if (offset == 0) {
         LOG.debug("seek called on same position as the previous one. New HTTP Stream is not "
                 + "required.");
-        return new DownloadInstructions();
+        return;
       }
       long blockSize = nativeStore.getBlockSize();
       if (offset < 0) {
@@ -159,7 +160,7 @@ public class SwiftInputStream extends FSInputStream {
         incPos(byteRead);
         if (targetPos == pos) {
           LOG.debug("seek reached targetPos: {}. New HTTP Stream is not required.", targetPos);
-          return new DownloadInstructions();
+          return;
         }
         LOG.debug("seek failed to reach targetPos: {}. New HTTP Stream is required.", targetPos);
       }
@@ -167,6 +168,9 @@ public class SwiftInputStream extends FSInputStream {
     }
     LOG.debug("seek method is opening a new HTTP Stream to: {}, for {}", targetPos,
             storedObject.getName());
+  }
+
+  protected DownloadInstructions seekPart2(long targetPos) throws IOException {
     DownloadInstructions instructions = new DownloadInstructions();
     AbstractRange range = new AbstractRange(targetPos, targetPos + nativeStore.getBlockSize()) {
 
@@ -184,7 +188,7 @@ public class SwiftInputStream extends FSInputStream {
     return instructions;
   }
 
-  protected void seekPart2(long targetPos, DownloadInstructions instructions) throws IOException {
+  protected void seekPart3(long targetPos, DownloadInstructions instructions) throws IOException {
     httpStream = storedObject.downloadObjectAsInputStream(instructions);
     LOG.debug("Seek completed. Got HTTP Stream for: {}", storedObject.getName());
     pos = targetPos;
