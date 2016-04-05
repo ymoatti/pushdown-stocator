@@ -53,6 +53,12 @@ public class SwiftOutputStream extends OutputStream {
    */
   private HttpURLConnection mHttpCon;
 
+  /**
+   * Default constructor
+   *
+   * @param httpCon
+   * @throws IOException
+   */
   public SwiftOutputStream(HttpURLConnection httpCon) throws IOException {
     try {
       httpCon.setDoInput(true);
@@ -105,7 +111,6 @@ public class SwiftOutputStream extends OutputStream {
       throw e;
     }
     mHttpCon.disconnect();
-    LOG.debug("Successfully closed");
   }
 
   @Override

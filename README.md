@@ -11,7 +11,7 @@ Stocator is a generic connector, that may contain various implementations for ob
 ## Major features
 * Implements HDFS interface
 * No need to change or recompile Spark
-* Doesn’t create any temporary folders or files for write operations. Each Spark's task generates only one object in the object store. Preserves existing Hadoop fault tolerance model (work in progress)
+* Doesn’t create any temporary folders or files for write operations. Each Spark's task generates only one object in the object store. Preserves existing Hadoop fault tolerance model.
 * There are no notions of directories (usually defined as empty files)
 * Object's name may contain "/"
 * Containers / buckets are automatically created
@@ -28,13 +28,16 @@ Checkout the Stocator source `https://github.com/SparkTC/stocator.git`
 ### How to build Stocator
 * Change directory to `stocator`
 * Execute `mvn install`
+* If you want to build a jar with all thedependecies, please execute `mvn clean package -Pall-in-one`
 
 ## Usage with Apache Spark
-New Swift's driver can be accessed via new schema `swift2d://`.
+Stocator allows to access Swift via new schema `swift2d://`.
 The configuration template located under `conf/core-site.xml.template`.
-Please make sure hadoop configuration (provided via Spark) contains
+Stocator requires
 
 	mapreduce.fileoutputcommitter.marksuccessfuljobs=true
+
+Usually there is nothing special to do. The default value of `mapreduce.fileoutputcommitter.marksuccessfuljobs` is `true`, therefore this key may not present at all in the Spark's configuration
 
 ### Reference the new driver in the core-site.xml
 Add driver reference in the `conf/core-site.xml` of Spark
@@ -204,18 +207,18 @@ Compile Spark with Haddop support
 	val distData = sc.parallelize(data)
 	distData.saveAsTextFile("swift2d://newcontainer.SERVICENAME/one1.txt")
 
-Listing container `newcontainer` will display
+Listing container `newcontainer` directly with a REST client will display
 
 	one1.txt
 	one1.txt/_SUCCESS
-	one1.txt/taskid-part-00000
-	one1.txt/taskid-part-00001
-	one1.txt/taskid-part-00002
-	one1.txt/taskid-part-00003
-	one1.txt/taskid-part-00004
-	one1.txt/taskid-part-00005
-	one1.txt/taskid-part-00006
-	one1.txt/taskid-part-00007
+	one1.txt/part-00000-taskid
+	one1.txt/part-00001-taskid
+	one1.txt/part-00002-taskid
+	one1.txt/part-00003-taskid
+	one1.txt/part-00004-taskid
+	one1.txt/part-00005-taskid
+	one1.txt/part-00006-taskid
+	one1.txt/part-00007-taskid
 
 ### Running Terasort
 
@@ -261,7 +264,7 @@ To easy the debug process, Please modify `conf/log4j.properties` and add
 
 	log4j.logger.com.ibm.stocator=DEBUG
 
-## Before you submit your pull request
+## Before you sumit your pull request
 We ask that you include a line similar to the following as part of your pull request comments: “DCO 1.1 Signed-off-by: Random J Developer“. “DCO” stands for “Developer Certificate of Origin,” and refers to the same text used in the Linux Kernel community. By adding this simple comment, you tell the community that you wrote the code you are contributing, or you have the right to pass on the code that you are contributing.
 
 ## Need more information?
