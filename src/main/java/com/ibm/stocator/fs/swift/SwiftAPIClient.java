@@ -26,6 +26,7 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
@@ -46,6 +47,7 @@ import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.mapreduce.TaskAttemptID;
 import org.apache.hadoop.fs.FileSystem.Statistics;
 
 import com.ibm.stocator.fs.common.Constants;
@@ -67,9 +69,13 @@ import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_AUTH_METHOD_PROPERT
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_CONTAINER_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_PUBLIC_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_BLOCK_SIZE_PROPERTY;
+import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_CSV_RECORD_DELIMITER_PROPERTY;
+import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_MAX_RECORD_SIZE_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_PROJECT_ID_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_USER_ID_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.FMODE_AUTOMATIC_DELETE_PROPERTY;
+import static com.ibm.stocator.fs.common.Constants.HADOOP_SUCCESS;
+import static com.ibm.stocator.fs.common.Constants.HADOOP_ATTEMPT;
 
 /**
  * Swift back-end driver
@@ -105,12 +111,37 @@ public class SwiftAPIClient implements IStoreClient {
    * block size
    */
   private long blockSize;
+  /*
+   * the record delimiter for CSV files
+   */
+  private String theRecordDelimiter;
+  /*
+   * the max CSV record size
+   */
+  private long theMaxRecordSize;
 
   /*
    * If true, automatic delete will be activated on the
    * data generated from failed tasks
    */
   private boolean fModeAutomaticDelete;
+
+  /*
+   * Contains map of object names that were written by Spark.
+   * Used in container listing
+   */
+  private Map<String, Boolean> cachedSparkOriginated;
+
+  /*
+   * Contains map of objects that were created by successfull Spark jobs.
+   * Used in container listing
+   */
+  private Map<String, Boolean> cachedSparkJobsStatus;
+
+  /*
+   * Page size for container listing
+   */
+  private final int pageListSize = 100;
 
   /**
    * Constructor method
@@ -120,14 +151,25 @@ public class SwiftAPIClient implements IStoreClient {
    * @throws IOException
    */
   public SwiftAPIClient(URI filesystemURI, Configuration conf) throws IOException {
-    LOG.debug("Init : {}", filesystemURI.toString());
     String preferredRegion = null;
     Properties props = ConfigurationHandler.initialize(filesystemURI, conf);
     container = props.getProperty(SWIFT_CONTAINER_PROPERTY);
     String isPubProp = props.getProperty(SWIFT_PUBLIC_PROPERTY, "false");
     usePublicURL = "true".equals(isPubProp);
+    // blockSize = Long.valueOf(props.getProperty(SWIFT_BLOCK_SIZE_PROPERTY,
+    //     "128")).longValue() * 1024 * 1024L;
+    // We move SWIFT_BLOCK_SIZE_PROPERTY to represent the number of KBs
+    // instead of MBs.  Much simple for debug
     blockSize = Long.valueOf(props.getProperty(SWIFT_BLOCK_SIZE_PROPERTY,
-        "128")).longValue() * 1024 * 1024L;
+        "128")).longValue() * 1024L;
+    LOG.warn(SWIFT_BLOCK_SIZE_PROPERTY + " --> " + blockSize);
+
+    // Following 2 are needed for the invocation of the CSV SQL pushdown storlet:
+    theRecordDelimiter = props.getProperty(SWIFT_CSV_RECORD_DELIMITER_PROPERTY, "\n");
+    theMaxRecordSize = Long.valueOf(props.getProperty(SWIFT_MAX_RECORD_SIZE_PROPERTY, "102400"));
+    LOG.warn(SWIFT_CSV_RECORD_DELIMITER_PROPERTY + " --> " + theRecordDelimiter);
+    LOG.warn(SWIFT_MAX_RECORD_SIZE_PROPERTY + " --> " + theMaxRecordSize);
+
     AccountConfig config = new AccountConfig();
     config.setPassword(props.getProperty(SWIFT_PASSWORD_PROPERTY));
     config.setAuthUrl(Utils.getOption(props, SWIFT_AUTH_PROPERTY));
@@ -163,6 +205,8 @@ public class SwiftAPIClient implements IStoreClient {
     if (preferredRegion != null) {
       mAccess.setPreferredRegion(preferredRegion);
     }
+    cachedSparkOriginated = new HashMap<String, Boolean>();
+    cachedSparkJobsStatus = new HashMap<String, Boolean>();
     Container containerObj = mAccount.getContainer(container);
     if (!containerObj.exists()) {
       containerObj.create();
@@ -181,6 +225,14 @@ public class SwiftAPIClient implements IStoreClient {
 
   public long getBlockSize() {
     return blockSize;
+  }
+
+  public long getMaxRecordSize() {
+    return theMaxRecordSize;
+  }
+
+  public String getCsvRecordDelimiter() {
+    return theRecordDelimiter;
   }
 
   public Account getAccount() {
@@ -235,7 +287,7 @@ public class SwiftAPIClient implements IStoreClient {
           isDirectory = true;
         }
       }
-      LOG.debug("Got object. isDirectory: {}  lastModified: {}", isDirectory, lastModified);
+      LOG.trace("Got object. isDirectory: {}  lastModified: {}", isDirectory, lastModified);
       return new FileStatus(contentLength, isDirectory, 1, blockSize,
               getLastModified(lastModified), path);
     }
@@ -251,9 +303,9 @@ public class SwiftAPIClient implements IStoreClient {
   }
 
   /**
-   * Transform last modified time stamp to long format
+   * Transforms last modified time stamp from String to the long format
    *
-   * @param strTime
+   * @param strTime time in string format as returned from Swift
    * @return time in long format
    * @throws IOException
    */
@@ -278,6 +330,7 @@ public class SwiftAPIClient implements IStoreClient {
   }
 
   public FSDataInputStream getObject(String hostName, Path path) throws IOException {
+    // SwiftInputStream.printStackTrace(" #### getOject hostname = " + hostName + " path= " + path);
     LOG.debug("Get object: {}", path);
     try {
       SwiftInputStream sis = new SwiftPushdownInputStream(this, hostName, path);
@@ -288,9 +341,29 @@ public class SwiftAPIClient implements IStoreClient {
     return null;
   }
 
-  public FileStatus[] listContainer(String hostName, Path path,
-      boolean fullListing) throws IOException {
-    LOG.debug("List container: path parent: {}, name {}", path.getParent(), path.getName());
+  /**
+   * {@inheritDoc}
+   *
+   * some examples of failed attempts:
+   * a/b/c.data/part-00099-attempt_201603171503_0001_m_000099_119
+   * a/b/c.data/part-00099-attempt_201603171503_0001_m_000099_120
+   * a/b/c.data/part-00099-attempt_201603171503_0001_m_000099_121
+   * a/b/c.data/part-00099-attempt_201603171503_0001_m_000099_122
+   * or
+   * a/b/c.data/part-r-00000-48ae3461-203f-4dd3-b141-a45426e2d26c
+   * .csv-attempt_201603171328_0000_m_000000_1
+   * a/b/c.data/part-r-00000-48ae3461-203f-4dd3-b141-a45426e2d26c
+   * .csv-attempt_201603171328_0000_m_000000_0
+   * in all the cases format is objectname-taskid where
+   * taskid may vary, depends how many tasks were re-submitted
+   * @param hostName
+   * @param path
+   * @param fullListing
+   * @return Array of Hadoop FileStatus
+   * @throws IOException
+   */
+  public FileStatus[] list(String hostName, Path path, boolean fullListing) throws IOException {
+    LOG.debug("List container: raw path parent", path.toString());
     Container cObj = mAccount.getContainer(container);
     String obj;
     if (path.toString().startsWith(container)) {
@@ -298,38 +371,64 @@ public class SwiftAPIClient implements IStoreClient {
     } else {
       obj = path.toString().substring(hostName.length());
     }
-    LOG.debug("Listing: {} container {}", obj, container);
+    LOG.debug("List container for {} container {}", obj, container);
     ArrayList<FileStatus> tmpResult = new ArrayList<FileStatus>();
-    PaginationMap paginationMap = cObj.getPaginationMap(obj, 100);
+    PaginationMap paginationMap = cObj.getPaginationMap(obj, pageListSize);
     FileStatus fs = null;
+    StoredObject previousElement = null;
     for (Integer page = 0; page < paginationMap.getNumberOfPages(); page++) {
       Collection<StoredObject> res = cObj.list(paginationMap, page);
       if (page == 0 && (res == null || res.isEmpty())) {
         FileStatus[] emptyRes = {};
+        LOG.debug("List {} in container {} is empty", obj, container);
         return emptyRes;
       }
       for (StoredObject tmp : res) {
-        fs = null;
-        String newMergedPath = getMergedPath(hostName, path, tmp.getName());
-        if (tmp.getContentLength() == 0) {
-          // we may hit a well known Swift bug.
-          // container listing reports 0 for large objects.
-          StoredObject soDirect = cObj
-              .getObject(tmp.getName());
-          if (soDirect.getContentLength() > 0 || fullListing) {
-            fs = new FileStatus(soDirect.getContentLength(), false, 1, blockSize,
-                getLastModified(soDirect.getLastModified()), 0, null,
-                null, null, new Path(newMergedPath));
-          }
-        } else if (tmp.getContentLength() > 0) {
-          fs = new FileStatus(tmp.getContentLength(), false, 1, blockSize,
-              getLastModified(tmp.getLastModified()), 0, null,
-              null, null, new Path(newMergedPath));
+        if (previousElement == null) {
+          // first entry
+          setCorrectSize(tmp, cObj);
+          previousElement = tmp.getAsObject();
+          continue;
         }
-        if ((fs != null && fs.getLen() > 0) || fullListing) {
+        String unifiedObjectName = extractUnifiedObjectName(tmp.getName());
+        if (isSparkOrigin(unifiedObjectName) && !fullListing) {
+          LOG.trace("{} created by Spark", unifiedObjectName);
+          if (!isJobSuccessfull(unifiedObjectName)) {
+            LOG.trace("{} created by failed Spark job. Skipped", unifiedObjectName);
+            if (fModeAutomaticDelete) {
+              delete(hostName, new Path(tmp.getName()), true);
+            }
+            continue;
+          } else {
+            // if we here - data created by spark and job completed successfully
+            // however there be might parts of failed tasks that were not aborted
+            // we need to make sure there are no failed attempts
+            if (nameWithoutTaskID(tmp.getName())
+                .equals(nameWithoutTaskID(previousElement.getName()))) {
+              // found failed that was not aborted.
+              LOG.trace("Collisiion found between {} and {}", previousElement.getName(),
+                  tmp.getName());
+              setCorrectSize(tmp, cObj);
+              if (previousElement.getContentLength() < tmp.getContentLength()) {
+                LOG.trace("New canditate is {}. Removed {}", tmp.getName(),
+                    previousElement.getName());
+                previousElement = tmp.getAsObject();
+              }
+              continue;
+            }
+          }
+        }
+        fs = null;
+        if (previousElement.getContentLength() > 0 || fullListing) {
+          fs = getFileStatus(previousElement, cObj, hostName, path);
           tmpResult.add(fs);
         }
+        previousElement = tmp.getAsObject();
       }
+    }
+    if (previousElement != null && (previousElement.getContentLength() > 0 || fullListing)) {
+      fs = getFileStatus(previousElement, cObj, hostName, path);
+      tmpResult.add(fs);
     }
     LOG.debug("Listing of {} completed with {} results", path.toString(), tmpResult.size());
     return tmpResult.toArray(new FileStatus[tmpResult.size()]);
@@ -390,7 +489,10 @@ public class SwiftAPIClient implements IStoreClient {
 
   @Override
   public boolean delete(String hostName, Path path, boolean recursive) throws IOException {
-    String obj = path.toString().substring(hostName.length());
+    String obj = path.toString();
+    if (path.toString().startsWith(hostName)) {
+      obj = path.toString().substring(hostName.length());
+    }
     LOG.debug("Object name to delete {}. Path {}", obj, path.toString());
     StoredObject so = mAccount.getContainer(container)
         .getObject(obj);
@@ -426,4 +528,156 @@ public class SwiftAPIClient implements IStoreClient {
     return null;
   }
 
+  /**
+   * Checks if container/object exists and verifies
+   * that it contains Data-Origin=stocator metadata
+   * If so, object was created by Spark.
+   *
+   * @param objectName
+   * @return boolean if object was created by Spark
+   */
+  private boolean isSparkOrigin(String objectName) {
+    if (cachedSparkOriginated.containsKey(objectName)) {
+      return cachedSparkOriginated.get(objectName).booleanValue();
+    }
+    String obj = objectName;
+    if (objectName.toString().startsWith(container)) {
+      obj = objectName.substring(container.length() + 1);
+    }
+    Boolean sparkOriginated = Boolean.FALSE;
+    StoredObject so = mAccount.getContainer(container).getObject(obj);
+    if (so.exists()) {
+      Object sparkOrigin = so.getMetadata("Data-Origin");
+      if (sparkOrigin != null) {
+        String tmp = (String) sparkOrigin;
+        if (tmp.equals("stocator")) {
+          sparkOriginated = Boolean.TRUE;
+        }
+      }
+    }
+    cachedSparkOriginated.put(objectName, sparkOriginated);
+    return sparkOriginated.booleanValue();
+  }
+
+  /**
+   * Checks if container/object contains
+   * container/object/_SUCCESS
+   * If so, this object was created by successful Hadoop job
+   *
+   * @param objectName
+   * @return boolean if job is successful
+   */
+  private boolean isJobSuccessfull(String objectName) {
+    if (cachedSparkJobsStatus.containsKey(objectName)) {
+      return cachedSparkJobsStatus.get(objectName).booleanValue();
+    }
+    String obj = objectName;
+    if (objectName.toString().startsWith(container)) {
+      obj = objectName.substring(container.length() + 1);
+    }
+    StoredObject so = mAccount.getContainer(container).getObject(obj + "/" + HADOOP_SUCCESS);
+    Boolean isJobOK = Boolean.FALSE;
+    if (so.exists()) {
+      isJobOK = Boolean.TRUE;
+    }
+    cachedSparkJobsStatus.put(objectName, isJobOK);
+    return isJobOK.booleanValue();
+  }
+
+  /**
+   * Accepts any object name.
+   * If object name of the form
+   * a/b/c/gil.data/part-r-00000-48ae3461-203f-4dd3-b141-a45426e2d26c
+   *    .csv-attempt_20160317132a_wrong_0000_m_000000_1
+   * Then a/b/c/gil.data is returned.
+   * Code testing that attempt_20160317132a_wrong_0000_m_000000_1 is valid
+   * task id identifier
+   *
+   * @param objectName
+   * @return unified object name
+   */
+  private String extractUnifiedObjectName(String objectName) {
+    Path p = new Path(objectName);
+    if (objectName.indexOf("-" + HADOOP_ATTEMPT) > 0) {
+      String attempt = objectName.substring(objectName.lastIndexOf("-") + 1);
+      try {
+        TaskAttemptID.forName(attempt);
+        return p.getParent().toString();
+      } catch (IllegalArgumentException e) {
+        return objectName;
+      }
+    } else if (objectName.indexOf(HADOOP_SUCCESS) > 0) {
+      return p.getParent().toString();
+    }
+    return objectName;
+  }
+
+  /**
+   * Accepts any object name.
+   * If object name is of the form
+   * a/b/c/m.data/part-r-00000-48ae3461-203f-4dd3-b141-a45426e2d26c
+   *    .csv-attempt_20160317132a_wrong_0000_m_000000_1
+   * Then a/b/c/m.data/part-r-00000-48ae3461-203f-4dd3-b141-a45426e2d26c.csv is returned.
+   * Perform test that attempt_20160317132a_wrong_0000_m_000000_1 is valid
+   * task id identifier
+   *
+   * @param objectName
+   * @return unified object name
+   */
+  private String nameWithoutTaskID(String objectName) {
+    int index = objectName.indexOf("-" + HADOOP_ATTEMPT);
+    if (index > 0) {
+      String attempt = objectName.substring(objectName.lastIndexOf("-") + 1);
+      try {
+        TaskAttemptID.forName(attempt);
+        return objectName.substring(0, index);
+      } catch (IllegalArgumentException e) {
+        return objectName;
+      }
+    }
+    return objectName;
+  }
+
+  /**
+   * Swift has a bug where container listing might wrongly report size 0
+   * for large objects. It's seems to be a well known issue in Swift without
+   * solution.
+   * We have to provide work around for this.
+   * If container listing reports size 0 for some object, we send
+   * additional HEAD on that object to verify it's size.
+   *
+   * @param tmp JOSS StoredObject
+   * @param cObj JOSS Container object
+   */
+  private void setCorrectSize(StoredObject tmp, Container cObj) {
+    long objectSize = tmp.getContentLength();
+    if (objectSize == 0) {
+      // we may hit a well known Swift bug.
+      // container listing reports 0 for large objects.
+      StoredObject soDirect = cObj
+          .getObject(tmp.getName());
+      if (soDirect.getContentLength() > 0) {
+        tmp.setContentLength(soDirect.getContentLength());
+      }
+    }
+  }
+
+  /**
+   * Maps StoredObject of JOSS into Hadoop FileStatus
+   *
+   * @param tmp
+   * @param cObj
+   * @param hostName
+   * @param path
+   * @return FileStatus representing current object
+   * @throws IllegalArgumentException
+   * @throws IOException
+   */
+  private FileStatus getFileStatus(StoredObject tmp, Container cObj,
+      String hostName, Path path) throws IllegalArgumentException, IOException {
+    String newMergedPath = getMergedPath(hostName, path, tmp.getName());
+    return new FileStatus(tmp.getContentLength(), false, 1, blockSize,
+        getLastModified(tmp.getLastModified()), 0, null,
+        null, null, new Path(newMergedPath));
+  }
 }

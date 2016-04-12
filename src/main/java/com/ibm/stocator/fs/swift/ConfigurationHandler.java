@@ -43,7 +43,9 @@ import static com.ibm.stocator.fs.swift.SwiftConstants.TENANT;
 import static com.ibm.stocator.fs.swift.SwiftConstants.REGION;
 import static com.ibm.stocator.fs.swift.SwiftConstants.PUBLIC;
 import static com.ibm.stocator.fs.swift.SwiftConstants.BLOCK_SIZE;
+import static com.ibm.stocator.fs.swift.SwiftConstants.MAX_RECORD_SIZE;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_BLOCK_SIZE_PROPERTY;
+import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_MAX_RECORD_SIZE_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_PROJECT_ID_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_USER_ID_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.FMODE_AUTOMATIC_DELETE_PROPERTY;
@@ -75,6 +77,8 @@ public final class ConfigurationHandler {
     Utils.updateProperty(conf, prefix, TENANT, props, SWIFT_TENANT_PROPERTY, true);
     Utils.updateProperty(conf, prefix, AUTH_METHOD, props, SWIFT_AUTH_METHOD_PROPERTY, false);
     Utils.updateProperty(conf, prefix, BLOCK_SIZE, props, SWIFT_BLOCK_SIZE_PROPERTY, false);
+    Utils.updateProperty(conf, prefix, MAX_RECORD_SIZE, props, SWIFT_MAX_RECORD_SIZE_PROPERTY,
+        false);
     Utils.updateProperty(conf, prefix, FMODE_DELETE_TEMP_DATA, props,
         FMODE_AUTOMATIC_DELETE_PROPERTY, false);
     Utils.updateProperty(conf, prefix, PUBLIC, props, SWIFT_PUBLIC_PROPERTY, false);
