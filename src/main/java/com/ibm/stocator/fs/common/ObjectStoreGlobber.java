@@ -165,7 +165,7 @@ public class ObjectStoreGlobber {
           candidate.setPath(new Path(candidate.getPath(), component));
         }
       } else {
-        globFilter = new ObjectStoreGlobFilter("*");
+        globFilter = new ObjectStoreGlobFilter(components.get(0));
       }
       ArrayList<FileStatus> newCandidates = new ArrayList<FileStatus>(candidates.size());
       for (FileStatus candidate : candidates) {
@@ -208,4 +208,3 @@ public class ObjectStoreGlobber {
     return results.toArray(new FileStatus[0]);
   }
 }
- //////  Comment at end of file ////////////
