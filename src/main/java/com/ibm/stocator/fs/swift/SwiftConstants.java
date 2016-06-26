@@ -59,12 +59,9 @@ public class SwiftConstants {
   public static final String MAX_RECORD_SIZE = ".max.record.size";
   public static final String SWIFT_MAX_RECORD_SIZE_PROPERTY = Constants.FS_SWIFT + MAX_RECORD_SIZE;
 
-  public static final String CSV_RECORD_DELIMITER = ".csv.record.delimiter";
-  public static final String SWIFT_CSV_RECORD_DELIMITER_PROPERTY = Constants.FS_SWIFT
-      + CSV_RECORD_DELIMITER;
-
   public static final String FMODE_DELETE_TEMP_DATA = ".failure.mode.delete";
   public static final String FMODE_AUTOMATIC_DELETE_PROPERTY = Constants.FS_SWIFT
       + FMODE_DELETE_TEMP_DATA;
 
+  public static final String SWIFT_BLOCK_SIZE_DEFAULT = "134217728";  // 128 MBytes
 }

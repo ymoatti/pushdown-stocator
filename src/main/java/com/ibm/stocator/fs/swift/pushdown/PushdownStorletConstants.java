@@ -16,7 +16,8 @@ package com.ibm.stocator.fs.swift.pushdown;
 
 public interface PushdownStorletConstants {
 
-  public static final String SWIFT_PUSHDOWN_STORLET_NAME = "CSVStorlet-1.0.jar";
+  public static final String SWIFT_PUSHDOWN_STORLET_NAME_PREFIX = "CSVStorlet-";
+  public static final String SWIFT_PUSHDOWN_STORLET_NAME_SUFIX  = ".0.jar";
   public static final String SWIFT_PUSHDOWN_STORLET_HEADER_NAME = "X-Run-Storlet";
   public static final String SWIFT_PUSHDOWN_STORLET_PARAM_PREFIX = "X-Storlet-Parameter-";
   public static final String SWIFT_PUSHDOWN_STORLET_QUERY_SEPARATOR = ";";
@@ -29,10 +30,8 @@ public interface PushdownStorletConstants {
   public static final String SWIFT_STORLET_QUERY_START = "?";
 
   /**
-   * permits to the client to specify the buffer length
+   * SWIFT_PUSHDOWN_STORLET_RANGE is added by stocator and consumed by the storlet middleware
    */
-  public static final String SWIFT_PUSHDOWN_STORLET_STREAM_BUFFER_LENGTH =
-                  "X-Storlet-StreamBufferLength";
   public static final String SWIFT_PUSHDOWN_STORLET_RANGE =
                   "X-Storlet-Range";
   public static final String SWIFT_PUSHDOWN_STORLET_REQUESTED_RANGE =
@@ -45,6 +44,8 @@ public interface PushdownStorletConstants {
                   "X-Storlet-FileEncryption";
   public static final String SWIFT_PUSHDOWN_STORLET_RECORD_DELIMITER =
                   "X-Storlet-RecordDelimiter";
+  public static final String SWIFT_PUSHDOWN_STORLET_DYNAMIC_DEBUG =
+                          "X-Storlet-DynamicDebug";
 
   public static final String SWIFT_PUSHDOWN_STORLET_REQUESTED_RANGE_SEPARATOR = "_";
 
@@ -54,9 +55,13 @@ public interface PushdownStorletConstants {
 
   public static final String DEFAULT_RECORD_DELIMITER = "\n";
   public static final String DEFAULT_PREDICATE = "";
+  public static final String DEFAULT_DYNAMIC_DEBUG = "0";
   public static final String DEFAULT_COLUMNS = "";
   public static final String DEFAULT_FILE_ENCRYPTION = "UTF-8";
   public static final long   DEFAULT_STREAM_BUFFER_LENGTH = 64 * 1024;  // 64 K
 
   public static final String COLUMNS_SEPARATOR = "_";   // in fact used in upper packages
+
+  public static final long DEFAULT_MAX_RECORD_SIZE = 102400; // 100 K
+
 }

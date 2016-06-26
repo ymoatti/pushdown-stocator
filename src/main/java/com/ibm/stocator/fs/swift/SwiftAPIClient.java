@@ -69,13 +69,17 @@ import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_AUTH_METHOD_PROPERT
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_CONTAINER_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_PUBLIC_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_BLOCK_SIZE_PROPERTY;
-import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_CSV_RECORD_DELIMITER_PROPERTY;
-import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_MAX_RECORD_SIZE_PROPERTY;
+import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_BLOCK_SIZE_DEFAULT;
+// import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_CSV_RECORD_DELIMITER_PROPERTY;
+// import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_MAX_RECORD_SIZE_PROPERTY;
+// import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_DYNAMIC_STORLET_DEBUG_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_PROJECT_ID_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.SWIFT_USER_ID_PROPERTY;
 import static com.ibm.stocator.fs.swift.SwiftConstants.FMODE_AUTOMATIC_DELETE_PROPERTY;
 import static com.ibm.stocator.fs.common.Constants.HADOOP_SUCCESS;
 import static com.ibm.stocator.fs.common.Constants.HADOOP_ATTEMPT;
+import static com.ibm.stocator.fs.swift.pushdown.PushdownStorletConstants.DEFAULT_MAX_RECORD_SIZE;
+import static com.ibm.stocator.fs.swift.pushdown.PushdownStorletConstants.DEFAULT_RECORD_DELIMITER;
 
 /**
  * Swift back-end driver
@@ -112,6 +116,10 @@ public class SwiftAPIClient implements IStoreClient {
    */
   private long blockSize;
   /*
+   * The version of the CSVStorlet
+   */
+  private int storletVersion;
+  /*
    * the record delimiter for CSV files
    */
   private String theRecordDelimiter;
@@ -119,6 +127,10 @@ public class SwiftAPIClient implements IStoreClient {
    * the max CSV record size
    */
   private long theMaxRecordSize;
+  /*
+   * the dynamic log debug level for CSV storlet
+   */
+  private int dynamicStorletDebug;
 
   /*
    * If true, automatic delete will be activated on the
@@ -156,19 +168,30 @@ public class SwiftAPIClient implements IStoreClient {
     container = props.getProperty(SWIFT_CONTAINER_PROPERTY);
     String isPubProp = props.getProperty(SWIFT_PUBLIC_PROPERTY, "false");
     usePublicURL = "true".equals(isPubProp);
-    // blockSize = Long.valueOf(props.getProperty(SWIFT_BLOCK_SIZE_PROPERTY,
-    //     "128")).longValue() * 1024 * 1024L;
-    // We move SWIFT_BLOCK_SIZE_PROPERTY to represent the number of KBs
-    // instead of MBs.  Much simple for debug
-    blockSize = Long.valueOf(props.getProperty(SWIFT_BLOCK_SIZE_PROPERTY,
-        "128")).longValue() * 1024L;
-    LOG.warn(SWIFT_BLOCK_SIZE_PROPERTY + " --> " + blockSize);
+    // SWIFT_BLOCK_SIZE_PROPERTY value is in bytes. The retained effective value is
+    long rawBlockSize = Long.valueOf(props.getProperty(SWIFT_BLOCK_SIZE_PROPERTY,
+        SWIFT_BLOCK_SIZE_DEFAULT)).longValue();
 
-    // Following 2 are needed for the invocation of the CSV SQL pushdown storlet:
-    theRecordDelimiter = props.getProperty(SWIFT_CSV_RECORD_DELIMITER_PROPERTY, "\n");
-    theMaxRecordSize = Long.valueOf(props.getProperty(SWIFT_MAX_RECORD_SIZE_PROPERTY, "102400"));
-    LOG.warn(SWIFT_CSV_RECORD_DELIMITER_PROPERTY + " --> " + theRecordDelimiter);
-    LOG.warn(SWIFT_MAX_RECORD_SIZE_PROPERTY + " --> " + theMaxRecordSize);
+    // The lower 10 bytes of rawBlockSize are used to encode development info
+    // such as the CSVStorlet version to be used and the dynamic debug level
+    blockSize = (rawBlockSize / 1024) * 1024; // erase the lower 10 bits
+    storletVersion = 1 + ((int)rawBlockSize % 16);
+
+    dynamicStorletDebug = (int)rawBlockSize;
+    dynamicStorletDebug = dynamicStorletDebug % 64;
+    dynamicStorletDebug = dynamicStorletDebug >> 4;
+
+    LOG.warn(SWIFT_BLOCK_SIZE_PROPERTY + " --> " + blockSize);
+    LOG.warn(" Dynamic storlet debug --> " +  dynamicStorletDebug);
+
+    // Following are needed for the invocation of the CSV SQL pushdown storlet:
+    theRecordDelimiter = DEFAULT_RECORD_DELIMITER;
+    theMaxRecordSize = DEFAULT_MAX_RECORD_SIZE;
+
+    LOG.warn("swift_csv_record_delimiter_property --> " + theRecordDelimiter);
+    LOG.warn("swift_max_record_size_property  --> " + theMaxRecordSize);
+    LOG.warn("swift_dynamic_storlet_debug_property --> " + dynamicStorletDebug);
+    LOG.warn("CSVStorlet version  --> " + storletVersion);
 
     AccountConfig config = new AccountConfig();
     config.setPassword(props.getProperty(SWIFT_PASSWORD_PROPERTY));
@@ -225,6 +248,14 @@ public class SwiftAPIClient implements IStoreClient {
 
   public long getBlockSize() {
     return blockSize;
+  }
+
+  public int getDynamicStorletDebug() {
+    return dynamicStorletDebug;
+  }
+
+  public int getStorletVersion() {
+    return storletVersion;
   }
 
   public long getMaxRecordSize() {

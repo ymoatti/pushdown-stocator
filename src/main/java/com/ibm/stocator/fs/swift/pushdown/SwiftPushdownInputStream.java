@@ -38,9 +38,11 @@ public class SwiftPushdownInputStream extends SwiftInputStream {
 
   private final List<GeneralHeader> pushdownHeaders = new ArrayList<>();
   private final long blockSize;   // used by stocator when reading a swift object
+  private final int dynamicStorletDebug;
   private final String csvRecordDelimiter;
   private final int delimiterLength;
   private final long maxRecordSize;  // maximum length in bytes of a CSV record
+  private final int storletVersion;
 
   public SwiftPushdownInputStream(SwiftAPIClient storeNative,
                                   String hostName, Path path)
@@ -53,9 +55,11 @@ public class SwiftPushdownInputStream extends SwiftInputStream {
     LOG.debug(str);
     Container theContainer = nativeStore.getAccount().getContainer(nativeStore.getDataRoot());
     blockSize = nativeStore.getBlockSize();
+    storletVersion = nativeStore.getStorletVersion();
     csvRecordDelimiter = nativeStore.getCsvRecordDelimiter();
     delimiterLength = csvRecordDelimiter.length();
     maxRecordSize = nativeStore.getMaxRecordSize();
+    dynamicStorletDebug = nativeStore.getDynamicStorletDebug();
 
     // handlePushdownHeaders does the following:
     // 1. put into pushdownHeaders all the necessary headers, except for the prefixLength
@@ -101,6 +105,10 @@ public class SwiftPushdownInputStream extends SwiftInputStream {
       addStorletParameterHeader(pushdownHeaders,
                  PushdownStorletConstants.SWIFT_PUSHDOWN_STORLET_REQUESTED_RANGE,
                  requestedRange);
+
+      addStorletParameterHeader(pushdownHeaders,
+                 PushdownStorletConstants.SWIFT_PUSHDOWN_STORLET_DYNAMIC_DEBUG,
+                        new Integer(dynamicStorletDebug).toString());
 
       // add all the pushdown headers:
       for (GeneralHeader nextHeader : pushdownHeaders) {
@@ -166,6 +174,8 @@ public class SwiftPushdownInputStream extends SwiftInputStream {
   }
 
   /**
+   * Adds within pushdownHeaders headers needed for pushdown storlet invocation
+   * @return  a path equals to input path but where the query string was truncated
    */
   private String handlePushdownHeaders(final Path path, final Container theContainer,
                                        final List<GeneralHeader> pushdownHeaders) {
@@ -202,9 +212,11 @@ public class SwiftPushdownInputStream extends SwiftInputStream {
       // add all the headers needed for the storlet invocation:
 
       // 1. this is the header that request the CSV storlet invocation:
+      final String storletName = PushdownStorletConstants.SWIFT_PUSHDOWN_STORLET_NAME_PREFIX
+                 + storletVersion + PushdownStorletConstants.SWIFT_PUSHDOWN_STORLET_NAME_SUFIX;
+
       pushdownHeaders.add(new GeneralHeader(
-          PushdownStorletConstants.SWIFT_PUSHDOWN_STORLET_HEADER_NAME,
-          PushdownStorletConstants.SWIFT_PUSHDOWN_STORLET_NAME)
+          PushdownStorletConstants.SWIFT_PUSHDOWN_STORLET_HEADER_NAME, storletName)
       );
 
       LOG.debug("Number of added ##Headers to container is " + pushdownHeaders.size());
